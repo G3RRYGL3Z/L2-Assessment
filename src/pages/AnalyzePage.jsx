@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { categorizeMessage } from '../utils/llmHelper'
-import { calculateUrgency } from '../utils/urgencyScorer'
+import { analyzeUrgency } from '../utils/urgencyScorer'
 import { getRecommendedAction } from '../utils/templates'
+import FeedbackWidget from '../components/FeedbackWidget'
 
 function AnalyzePage() {
   const [message, setMessage] = useState('')
@@ -26,21 +27,22 @@ function AnalyzePage() {
 
     setIsLoading(true)
     setResults(null)
-    
+
     try {
       // Run categorization (LLM call)
       const { category, reasoning } = await categorizeMessage(message)
-      
-      // Calculate urgency (rule-based)
-      const urgency = calculateUrgency(message)
-      
+
+      // Calculate urgency with context-sensitive analysis
+      const { urgency, reason: urgencyReasoning } = analyzeUrgency(message)
+
       // Get recommended action (template-based)
       const recommendedAction = getRecommendedAction(category)
-      
+
       const analysisResult = {
         message,
         category,
         urgency,
+        urgencyReasoning, // Add the urgency reasoning
         recommendedAction,
         reasoning,
         timestamp: new Date().toISOString()
@@ -96,11 +98,10 @@ function AnalyzePage() {
             <button
               onClick={handleAnalyze}
               disabled={isLoading}
-              className={`flex-1 py-3 rounded-lg font-semibold ${
-                isLoading
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
+              className={`flex-1 py-3 rounded-lg font-semibold ${isLoading
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">
@@ -128,7 +129,7 @@ function AnalyzePage() {
         {results && (
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Analysis Results</h2>
-            
+
             <div className="space-y-4">
               <div>
                 <div className="text-sm font-semibold text-gray-600 mb-1">Category</div>
@@ -139,13 +140,19 @@ function AnalyzePage() {
 
               <div>
                 <div className="text-sm font-semibold text-gray-600 mb-1">Urgency Level</div>
-                <div className={`inline-block px-4 py-2 rounded-lg font-semibold ${
-                  results.urgency === 'High' ? 'bg-red-200 text-red-900' :
+                <div className={`inline-block px-4 py-2 rounded-lg font-semibold ${results.urgency === 'High' ? 'bg-red-200 text-red-900' :
                   results.urgency === 'Medium' ? 'bg-yellow-200 text-yellow-900' :
-                  'bg-green-200 text-green-900'
-                }`}>
+                    results.urgency === 'Standard' ? 'bg-blue-200 text-blue-900' :
+                      'bg-green-200 text-green-900'
+                  }`}>
                   {results.urgency}
                 </div>
+                {results.urgencyReasoning && (
+                  <div className="mt-2 bg-orange-50 border border-orange-200 rounded-lg p-3">
+                    <div className="text-xs font-semibold text-orange-800 mb-1">Urgency Analysis</div>
+                    <p className="text-sm text-gray-700">{results.urgencyReasoning}</p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -167,7 +174,17 @@ function AnalyzePage() {
               </div>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-gray-200">
+            {/* Feedback Widget */}
+            <div className="mt-6">
+              <FeedbackWidget
+                messageId={results.timestamp}
+                message={results.message}
+                urgency={results.urgency}
+                category={results.category}
+              />
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-gray-200">
               <button
                 onClick={() => {
                   const text = `Category: ${results.category}\nUrgency: ${results.urgency}\nRecommendation: ${results.recommendedAction}\n\nReasoning: ${results.reasoning}`

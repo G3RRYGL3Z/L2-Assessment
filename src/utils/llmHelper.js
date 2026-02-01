@@ -5,11 +5,21 @@ import Groq from 'groq-sdk';
  * Using Groq API for AI-powered categorization
  */
 
-// Initialize Groq client
-const groq = new Groq({
-  apiKey: import.meta.env.VITE_GROQ_API_KEY,
-  dangerouslyAllowBrowser: true // Required for browser-based calls (not recommended for production!)
-});
+// Initialize Groq client (only if API key is available)
+let groq = null;
+try {
+  const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+  if (apiKey && apiKey !== 'your_groq_api_key_here') {
+    groq = new Groq({
+      apiKey: apiKey,
+      dangerouslyAllowBrowser: true // Required for browser-based calls (not recommended for production!)
+    });
+  } else {
+    console.warn('Groq API key not configured. Using mock categorization.');
+  }
+} catch (error) {
+  console.warn('Failed to initialize Groq client:', error.message);
+}
 
 /**
  * Categorize a customer support message using Groq AI
@@ -18,34 +28,86 @@ const groq = new Groq({
  * @returns {Promise<{category: string, reasoning: string}>}
  */
 export async function categorizeMessage(message) {
+  // If Groq client is not initialized, use mock categorization
+  if (!groq) {
+    console.warn('Groq client not available, using mock categorization');
+    return getMockCategorization(message);
+  }
+
   try {
+    // Comprehensive system instruction for triage AI
+    const systemInstruction = `You are a Triage AI for customer support messages. Your primary goal is to catch High Urgency cases with 90% accuracy.
+
+CRITICAL TRIGGERS (Always High Urgency):
+- Wrong medication, incorrect meds, medication error
+- No heat in winter, heating failure, furnace broken
+- Hacking, security breach, data breach, unauthorized access
+- Restaurant supply delays (for food service businesses)
+- Law 88 violations, building fines, compliance issues
+- Medical emergencies: can't breathe, chest pain, bleeding, unconscious
+- Account locked, payment failed, can't access account
+
+CONTEXT-SENSITIVE ANALYSIS:
+- "Help walking dogs" → Standard urgency (routine task)
+- "Medical help" or "Dog needs medical help" → High urgency (emergency)
+- "Feature request" → Low urgency
+- "Thank you" messages → Low urgency
+- Technical issues blocking work → High urgency
+- Minor bugs or slow performance → Medium urgency
+
+CATEGORIZATION:
+Assign ONE of these categories:
+1. Billing Issue - Payment, invoices, charges, refunds, subscription issues
+2. Technical Problem - Bugs, errors, system down, performance issues
+3. Feature Request - Suggestions, enhancements, new functionality
+4. General Inquiry - Questions, how-to, information requests
+5. Account Access - Login issues, password resets, account locked
+6. Emergency - Safety, security, compliance, critical business impact
+
+RESPONSE FORMAT:
+Provide a brief explanation (2-3 sentences) of:
+1. What category this message belongs to
+2. Why you chose this category
+3. Any critical triggers or context you identified
+
+Be concise but thorough. Focus on accuracy over verbosity.`;
+
     const response = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
         {
+          role: "system",
+          content: systemInstruction
+        },
+        {
           role: "user",
-          content: `Categorize this customer support message: ${message}`
+          content: `Analyze and categorize this customer support message:\n\n"${message}"`
         }
       ],
-      temperature: 0.7,
+      temperature: 0.3, // Lower temperature for more consistent categorization
+      max_tokens: 300
     });
 
     const content = response.choices[0].message.content;
-    
-    const lines = content.split('\n');
-    let category = "Unknown";
-    let reasoning = content;
-    
-    if (content.toLowerCase().includes('billing')) {
+
+    // Extract category from AI response
+    let category = "General Inquiry"; // Default
+    const contentLower = content.toLowerCase();
+
+    if (contentLower.includes('billing') || contentLower.includes('payment')) {
       category = "Billing Issue";
-    } else if (content.toLowerCase().includes('technical') || content.toLowerCase().includes('bug')) {
+    } else if (contentLower.includes('technical') || contentLower.includes('bug') || contentLower.includes('error')) {
       category = "Technical Problem";
-    } else if (content.toLowerCase().includes('feature')) {
+    } else if (contentLower.includes('feature') || contentLower.includes('enhancement')) {
       category = "Feature Request";
-    } else if (content.toLowerCase().includes('inquiry') || content.toLowerCase().includes('question')) {
+    } else if (contentLower.includes('account access') || contentLower.includes('login') || contentLower.includes('locked')) {
+      category = "Account Access";
+    } else if (contentLower.includes('emergency') || contentLower.includes('critical')) {
+      category = "Emergency";
+    } else if (contentLower.includes('inquiry') || contentLower.includes('question')) {
       category = "General Inquiry";
     }
-    
+
     return {
       category,
       reasoning: content
@@ -61,7 +123,7 @@ export async function categorizeMessage(message) {
  */
 function getMockCategorization(message) {
   const lowerMessage = message.toLowerCase();
-  
+
   // Array of possible reasoning variations for each category
   const reasoningVariations = {
     billing: [
@@ -94,69 +156,69 @@ function getMockCategorization(message) {
       "This message doesn't contain clear indicators for automatic categorization. Human review recommended.",
     ]
   };
-  
+
   // Helper to get random reasoning
   const getRandomReasoning = (category) => {
     const reasons = reasoningVariations[category];
     return reasons[Math.floor(Math.random() * reasons.length)];
   };
-  
+
   // Billing-related detection
-  if (lowerMessage.includes('bill') || lowerMessage.includes('payment') || 
-      lowerMessage.includes('charge') || lowerMessage.includes('invoice') ||
-      lowerMessage.includes('credit card') || lowerMessage.includes('subscription') ||
-      lowerMessage.includes('refund') || lowerMessage.includes('cancel') && lowerMessage.includes('account')) {
+  if (lowerMessage.includes('bill') || lowerMessage.includes('payment') ||
+    lowerMessage.includes('charge') || lowerMessage.includes('invoice') ||
+    lowerMessage.includes('credit card') || lowerMessage.includes('subscription') ||
+    lowerMessage.includes('refund') || lowerMessage.includes('cancel') && lowerMessage.includes('account')) {
     return {
       category: "Billing Issue",
       reasoning: getRandomReasoning('billing')
     };
   }
-  
+
   // Technical problem detection
-  if (lowerMessage.includes('bug') || lowerMessage.includes('error') || 
-      lowerMessage.includes('broken') || lowerMessage.includes('not working') ||
-      lowerMessage.includes('crash') || lowerMessage.includes('down') || 
-      lowerMessage.includes('server') || lowerMessage.includes('loading') ||
-      lowerMessage.includes('slow') || lowerMessage.includes('issue') ||
-      lowerMessage.includes('problem') && !lowerMessage.includes('no problem')) {
+  if (lowerMessage.includes('bug') || lowerMessage.includes('error') ||
+    lowerMessage.includes('broken') || lowerMessage.includes('not working') ||
+    lowerMessage.includes('crash') || lowerMessage.includes('down') ||
+    lowerMessage.includes('server') || lowerMessage.includes('loading') ||
+    lowerMessage.includes('slow') || lowerMessage.includes('issue') ||
+    lowerMessage.includes('problem') && !lowerMessage.includes('no problem')) {
     return {
       category: "Technical Problem",
       reasoning: getRandomReasoning('technical')
     };
   }
-  
+
   // Feature request detection
   if (lowerMessage.includes('feature') || lowerMessage.includes('add') && (lowerMessage.includes('please') || lowerMessage.includes('could')) ||
-      lowerMessage.includes('improve') || lowerMessage.includes('would like to see') ||
-      lowerMessage.includes('suggestion') || lowerMessage.includes('wish') ||
-      lowerMessage.includes('could you') && lowerMessage.includes('add') ||
-      lowerMessage.includes('enhancement') || lowerMessage.includes('would be great')) {
+    lowerMessage.includes('improve') || lowerMessage.includes('would like to see') ||
+    lowerMessage.includes('suggestion') || lowerMessage.includes('wish') ||
+    lowerMessage.includes('could you') && lowerMessage.includes('add') ||
+    lowerMessage.includes('enhancement') || lowerMessage.includes('would be great')) {
     return {
       category: "Feature Request",
       reasoning: getRandomReasoning('feature')
     };
   }
-  
+
   // Positive feedback detection
   if ((lowerMessage.includes('thank') || lowerMessage.includes('thanks') || lowerMessage.includes('appreciate')) &&
-      !lowerMessage.includes('but') && !lowerMessage.includes('however')) {
+    !lowerMessage.includes('but') && !lowerMessage.includes('however')) {
     return {
       category: "General Inquiry",
       reasoning: getRandomReasoning('positive')
     };
   }
-  
+
   // Question/inquiry detection
-  if (lowerMessage.includes('how') || lowerMessage.includes('what') || 
-      lowerMessage.includes('when') || lowerMessage.includes('where') ||
-      lowerMessage.includes('can i') || lowerMessage.includes('is there') ||
-      lowerMessage.includes('?')) {
+  if (lowerMessage.includes('how') || lowerMessage.includes('what') ||
+    lowerMessage.includes('when') || lowerMessage.includes('where') ||
+    lowerMessage.includes('can i') || lowerMessage.includes('is there') ||
+    lowerMessage.includes('?')) {
     return {
       category: "General Inquiry",
       reasoning: getRandomReasoning('inquiry')
     };
   }
-  
+
   // Fallback for ambiguous messages
   return {
     category: "General Inquiry",
